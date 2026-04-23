@@ -1,0 +1,167 @@
+# 软件包配置文件
+# type: official/aur/flatpak/script
+
+official:
+  - name: docker
+    command: docker
+    desc: Docker + Compose + NVIDIA GPU (开发)
+    install: sudo pacman -S --noconfirm docker docker-compose docker-buildx
+    check: pacman -Q docker
+
+  - name: lazydocker
+    command: lazydocker
+    desc: LazyDocker (Docker UI)
+    install: sudo pacman -S --noconfirm lazydocker
+    check: pacman -Q lazydocker
+
+  - name: uv
+    command: uv
+    desc: uv - Python 包管理器 (开发)
+    install: sudo pacman -S --noconfirm uv
+    check: pacman -Q uv
+
+  - name: telegram
+    command: telegram-desktop
+    desc: Telegram Desktop (通讯)
+    install: sudo pacman -S --noconfirm telegram-desktop
+    check: pacman -Q telegram-desktop
+
+  - name: audacity
+    command: audacity
+    desc: Audacity - 音频编辑 (多媒体)
+    install: sudo pacman -S --noconfirm audacity
+    check: pacman -Q audacity
+
+  - name: kdenlive
+    command: kdenlive
+    desc: Kdenlive - 视频编辑 (多媒体)
+    install: sudo pacman -S --noconfirm kdenlive
+    check: pacman -Q kdenlive
+    
+  - name: gigolo
+    command: gigolo
+    desc: gigolo - 远程文件系统管理前端
+    install: sudo pacman -S --noconfirm gigolo
+    check: pacman -Q gigolo
+
+  - name: filezilla
+    command: filezilla
+    desc: filezilla - 快速可靠的FTP、FTPS和SFTP客户端
+    install: sudo pacman -S --noconfirm filezilla
+    check: pacman -Q filezilla
+
+aur:
+  - name: brave
+    command: brave
+    desc: Brave Browser (浏览器)
+    install: paru -S --noconfirm brave-bin
+    check: pacman -Q brave-bin
+
+  - name: chrome
+    command: google-chrome
+    desc: Google Chrome (浏览器)
+    install: paru -S --noconfirm google-chrome
+    check: pacman -Q google-chrome
+
+  - name: vscode
+    command: code
+    desc: VS Code (IDE)
+    install: |
+      if pacman -Si code &>/dev/null; then
+        sudo pacman -S --noconfirm code
+      else
+        paru -S --noconfirm visual-studio-code-bin
+      fi
+    check: pacman -Q code
+
+  - name: backintime
+    command: backintime
+    desc: BackInTime - 备份工具 (系统)
+    install: paru -S --noconfirm backintime
+    check: pacman -Q backintime
+
+  - name: shelly
+    command: shelly-bin
+    desc: Shelly - Arch 包管理器 (系统)
+    install: paru -S --noconfirm shelly-bin
+    check: pacman -Q shelly-bin
+
+  - name: krokiet 
+    command: krokiet-bin
+    desc: Krokiet - 重复文件清理 (系统)
+    install: paru -S --noconfirm krokiet-bin
+    check: pacman -Q krokiet-bin
+
+flatpak:
+  - name: localsend
+    command: org.localsend.localsend_app
+    desc: LocalSend - 局域网传输 (网络)
+    install: flatpak install -y flathub org.localsend.localsend_app
+    check: flatpak list | grep -q org.localsend.localsend_app
+
+  - name: losslesscut
+    command: no.mifi.losslesscut
+    desc: LosslessCut - 视频处理 (多媒体)
+    install: flatpak install -y flathub no.mifi.losslesscut
+    check: flatpak list | grep -q no.mifi.losslesscut
+
+
+  - name: fsearch
+    command: io.github.cboxdoerfer.FSearch
+    desc: FSearch - 文件搜索 (系统)
+    install: flatpak install -y flathub io.github.cboxdoerfer.FSearch
+    check: flatpak list | grep -q io.github.cboxdoerfer.FSearch
+
+  - name: warehouse
+    command: io.github.flattool.Warehouse
+    desc: Warehouse - Flatpak 管理 (系统)
+    install: flatpak install -y flathub io.github.flattool.Warehouse
+    check: flatpak list | grep -q io.github.flattool.Warehouse
+
+  - name: gearlever
+    command: it.mijorus.gearlever
+    desc: GearLever - Flatpak/EXE 启动器 (系统)
+    install: flatpak install -y flathub it.mijorus.gearlever
+    check: flatpak list | grep -q it.mijorus.gearlever
+
+  - name: freefilesync
+    command: org.freefilesync.FreeFileSync
+    desc: FreeFileSync - 文件同步 (系统)
+    install: flatpak install -y flathub org.freefilesync.FreeFileSync
+    check: flatpak list | grep -q org.freefilesync.FreeFileSync
+
+  - name: bottles
+    command: com.usebottles.bottles
+    desc: Bottles - Windows 兼容层 (游戏)
+    install: flatpak install -y flathub com.usebottles.bottles
+    check: flatpak list | grep -q com.usebottles.bottles
+
+  - name: XnConvert
+    command: com.xnview.XnConvert
+    desc: XnConvert - 图片格式转换
+    install: flatpak install -y flathub com.xnview.XnConvert
+    check: flatpak list | grep -q com.xnview.XnConvert
+    
+script:
+  - name: opencode
+    command: opencode
+    desc: OpenCode - AI 代码助手
+    install: |
+      if curl -fsSL https://opencode.ai/install | bash 2>/dev/null; then
+        :
+      elif command -v npm &>/dev/null; then
+        npm i -g opencode-ai
+      fi
+    check: command -v opencode
+
+  - name: nodejs
+    command: nvm
+    desc: Node.js v24 (nvm/开发)
+    install: |
+      export NVM_DIR="$HOME/.config/nvm"
+      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+      nvm install 24 && nvm alias default 24
+    check: |
+      [ -d "$HOME/.config/nvm" ] && export NVM_DIR="$HOME/.config/nvm" &&
+      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" &&
+      nvm list 2>/dev/null | grep -q v24

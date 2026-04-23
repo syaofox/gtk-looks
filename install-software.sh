@@ -1,8 +1,8 @@
 #!/bin/bash
-# 常用软件安装脚本 - 交互式多选 (Arch Linux 适配版)
-# 纯 Bash 交互，无 whiptail 依赖
+# 常用软件安装脚本 - 配置文件驱动
+# 配置文件: packages.yaml
 
-# set -euo pipefail
+set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -18,27 +18,32 @@ log_step()  { echo -e "\n${CYAN}==> $1${NC}"; }
 [[ "$EUID" -eq 0 ]] && { echo -e "${RED}请勿使用 root 运行此脚本${NC}"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="$SCRIPT_DIR/packages.yaml"
 
-yes_no() {
-    local prompt="$1"
-    local default="${2:-n}"
-    local ans
-    while true; do
-        if [[ "$default" == "y" ]]; then
-            read -p "$prompt [Y/n]: " ans
-        else
-            read -p "$prompt [y/N]: " ans
-        fi
-        ans=${ans:-$default}
-        case "$ans" in
-            [Yy]*) return 0 ;;
-            [Nn]*) return 1 ;;
-            *) echo "请输入 y 或 n" ;;
-        esac
-    done
+SOURCE=""
+TITLE=""
+
+declare -a OFFICIAL_ARR AUR_ARR FLATPAK_ARR SCRIPT_ARR
+declare -A OFFICIAL_CMD AUR_CMD FLATPAK_CMD SCRIPT_CMD
+declare -A OFFICIAL_DESC AUR_DESC FLATPAK_DESC SCRIPT_DESC
+declare -A OFFICIAL_INSTALL AUR_INSTALL FLATPAK_INSTALL SCRIPT_INSTALL
+declare -A OFFICIAL_CHECK AUR_CHECK FLATPAK_CHECK SCRIPT_CHECK
+
+ensure_yq() {
+    if command -v yq &>/dev/null; then
+        return 0
+    fi
+    log_warn "未找到 yq，将尝试安装..."
+    if command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm yq
+    elif command -v apt &>/dev/null; then
+        sudo apt install -y yq
+    else
+        log_error "无法安装 yq，请手动安装"
+        exit 1
+    fi
 }
 
-# 确保 fzf 可用
 ensure_fzf() {
     if command -v fzf &>/dev/null; then
         return 0
@@ -51,15 +56,6 @@ ensure_fzf() {
     fi
 }
 
-# fzf 多选菜单
-fzf_multiselect() {
-    local title="$1"
-    shift
-    local items=("$@")
-    printf "%s\n" "${items[@]}" | fzf --multi --height=20 --prompt="选择软件 (Tab/空格多选, 回车确认): " --header="$title"
-}
-
-# 确保 paru 可用
 ensure_paru() {
     if command -v paru &>/dev/null; then
         return 0
@@ -79,7 +75,6 @@ ensure_paru() {
     log_info "paru 安装完成"
 }
 
-# 确保 flatpak 可用
 ensure_flatpak() {
     if ! command -v flatpak &>/dev/null; then
         log_info "安装 flatpak..."
@@ -90,11 +85,162 @@ ensure_flatpak() {
     fi
 }
 
-# ============================================================
-# 主菜单 - 按安装来源分类
-# ============================================================
+fzf_multiselect() {
+    local title="$1"
+    shift
+    local items=("$@")
+    printf "%s\n" "${items[@]}" | fzf \
+        --multi --height=20 \
+        --prompt="选择软件 (Tab/空格单选): " \
+        --header="$title" \
+        --bind "ctrl-a:select-all" \
+        --bind "ctrl-d:deselect-all" \
+        --bind "ctrl-r:toggle-all" \
+        --bind "enter:accept"
+}
 
-show_main_menu() {
+load_packages() {
+    ensure_yq
+    
+    for type in official aur flatpak script; do
+        local count
+        count=$(yq ".$type | length" "$CONFIG_FILE")
+        
+        for i in $(seq 0 $((count - 1))); do
+            local name cmd desc install check
+            name=$(yq -r ".$type[$i].name" "$CONFIG_FILE")
+            cmd=$(yq -r ".$type[$i].command" "$CONFIG_FILE")
+            desc=$(yq -r ".$type[$i].desc" "$CONFIG_FILE")
+            install=$(yq -r ".$type[$i].install" "$CONFIG_FILE")
+            check=$(yq -r ".$type[$i].check" "$CONFIG_FILE")
+            
+            [[ -z "$name" ]] && continue
+            
+            case "$type" in
+                official)
+                    OFFICIAL_ARR+=("$name")
+                    OFFICIAL_CMD["$name"]="$cmd"
+                    OFFICIAL_DESC["$name"]="$desc"
+                    OFFICIAL_INSTALL["$name"]="$install"
+                    OFFICIAL_CHECK["$name"]="$check"
+                    ;;
+                aur)
+                    AUR_ARR+=("$name")
+                    AUR_CMD["$name"]="$cmd"
+                    AUR_DESC["$name"]="$desc"
+                    AUR_INSTALL["$name"]="$install"
+                    AUR_CHECK["$name"]="$check"
+                    ;;
+                flatpak)
+                    FLATPAK_ARR+=("$name")
+                    FLATPAK_CMD["$name"]="$cmd"
+                    FLATPAK_DESC["$name"]="$desc"
+                    FLATPAK_INSTALL["$name"]="$install"
+                    FLATPAK_CHECK["$name"]="$check"
+                    ;;
+                script)
+                    SCRIPT_ARR+=("$name")
+                    SCRIPT_CMD["$name"]="$cmd"
+                    SCRIPT_DESC["$name"]="$desc"
+                    SCRIPT_INSTALL["$name"]="$install"
+                    SCRIPT_CHECK["$name"]="$check"
+                    ;;
+            esac
+        done
+    done
+}
+
+get_options() {
+    local source="$1"
+    local is_all="${2:-false}"
+    
+    if [[ "$is_all" != "true" ]]; then
+        OPTIONS_KEYS=()
+        OPTIONS_DESC=()
+    fi
+    
+    case "$source" in
+        official)
+            for name in "${OFFICIAL_ARR[@]}"; do
+                local desc="${OFFICIAL_DESC[$name]}"
+                local check="${OFFICIAL_CHECK[$name]}"
+                if eval "$check" 2>/dev/null; then
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[✓] $desc")
+                else
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[ ] $desc")
+                fi
+            done
+            ;;
+        aur)
+            for name in "${AUR_ARR[@]}"; do
+                local desc="${AUR_DESC[$name]}"
+                local check="${AUR_CHECK[$name]}"
+                if eval "$check" 2>/dev/null; then
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[✓] $desc")
+                else
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[ ] $desc")
+                fi
+            done
+            ;;
+        flatpak)
+            for name in "${FLATPAK_ARR[@]}"; do
+                local desc="${FLATPAK_DESC[$name]}"
+                local check="${FLATPAK_CHECK[$name]}"
+                if eval "$check" 2>/dev/null; then
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[✓] $desc")
+                else
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[ ] $desc")
+                fi
+            done
+            ;;
+        script)
+            for name in "${SCRIPT_ARR[@]}"; do
+                local desc="${SCRIPT_DESC[$name]}"
+                local check="${SCRIPT_CHECK[$name]}"
+                if eval "$check" 2>/dev/null; then
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[✓] $desc")
+                else
+                    OPTIONS_KEYS+=("$name")
+                    OPTIONS_DESC+=("[ ] $desc")
+                fi
+            done
+            ;;
+        all)
+            get_options "official" "true"
+            get_options "aur" "true"
+            get_options "flatpak" "true"
+            get_options "script" "true"
+            ;;
+    esac
+}
+
+get_install_cmd() {
+    local name="$1"
+    local source="$2"
+    case "$source" in
+        official|[Oo]fficial*) echo "${OFFICIAL_INSTALL[$name]}" ;;
+        aur|[Aa]ur*) echo "${AUR_INSTALL[$name]}" ;;
+        flatpak|[Ff]latpak*) echo "${FLATPAK_INSTALL[$name]}" ;;
+        script|[Ss]cript*) echo "${SCRIPT_INSTALL[$name]}" ;;
+    esac
+}
+
+get_source_by_name() {
+    local name="$1"
+    [[ -n "${OFFICIAL_INSTALL[$name]:-}" ]] && echo "official" && return
+    [[ -n "${AUR_INSTALL[$name]:-}" ]] && echo "aur" && return
+    [[ -n "${FLATPAK_INSTALL[$name]:-}" ]] && echo "flatpak" && return
+    [[ -n "${SCRIPT_INSTALL[$name]:-}" ]] && echo "script" && return
+}
+
+show_cat_menu() {
     clear
     ensure_fzf
     local options=(
@@ -105,505 +251,85 @@ show_main_menu() {
         "全部软件"
     )
     local choice
-    choice=$(printf "%s\n" "${options[@]}" | fzf --height=12 --prompt="选择安装来源: ") || { log_info "已取消"; exit 0; }
-    [[ -z "$choice" ]] && { log_info "已取消"; exit 0; }
+    choice=$(printf "%s\n" "${options[@]}" | fzf --height=12 --prompt="选择安装来源: ") || return 1
+    [[ -z "$choice" ]] && return 1
+    
     case "$choice" in
-        "官方仓库"*) SOURCE="official" ;;
-        "AUR"*) SOURCE="aur" ;;
-        "Flatpak"*) SOURCE="flatpak" ;;
-        "安装脚本"*) SOURCE="script" ;;
-        "全部软件"*) SOURCE="all" ;;
-        *) log_error "无效选择"; exit 1 ;;
+        "官方仓库"*) SOURCE="official"; TITLE="官方仓库 (pacman)" ;;
+        "AUR"*) SOURCE="aur"; TITLE="AUR (paru)" ;;
+        "Flatpak"*) SOURCE="flatpak"; TITLE="Flatpak" ;;
+        "安装脚本"*) SOURCE="script"; TITLE="安装脚本" ;;
+        "全部软件"*) SOURCE="all"; TITLE="全部软件" ;;
+        *) return 1 ;;
     esac
-}
-
-show_submenu() {
-    local source="$1"
-    case "$source" in
-        official)
-            OPTIONS_DESC=(
-                "Docker + Compose + NVIDIA GPU (开发)"
-                "LazyDocker (Docker UI)"
-                "uv - Python 包管理器 (开发)"
-                "Telegram Desktop (通讯)"
-                "Audacity - 音频编辑 (多媒体)"
-                "Kdenlive - 视频编辑 (多媒体)"
-                "Node.js v24 (nvm/开发)"
-            )
-            OPTIONS_KEYS=(
-                "docker"
-                "lazydocker"
-                "uv"
-                "telegram"
-                "audacity"
-                "kdenlive"
-                "nodejs"
-            )
-            ;;
-        aur)
-            OPTIONS_DESC=(
-                "Brave Browser (浏览器)"
-                "Google Chrome (浏览器)"
-                "VS Code (IDE)"
-                "BackInTime - 备份工具 (系统)"
-                "Shelly - Arch 包管理器 (系统)"
-            )
-            OPTIONS_KEYS=(
-                "brave"
-                "chrome"
-                "vscode"
-                "backintime"
-                "shelly"
-            )
-            ;;
-        flatpak)
-            OPTIONS_DESC=(
-                "LocalSend - 局域网传输 (网络)"
-                "LosslessCut - 视频处理 (多媒体)"
-                "Czkawka - 重复文件清理 (系统)"
-                "FSearch - 文件搜索 (系统)"
-                "Warehouse - Flatpak 管理 (系统)"
-                "GearLever - Flatpak/EXE 启动器 (系统)"
-                "FreeFileSync - 文件同步 (系统)"
-                "Bottles - Windows 兼容层 (游戏)"
-            )
-            OPTIONS_KEYS=(
-                "localsend"
-                "losslesscut"
-                "czkawka"
-                "fsearch"
-                "warehouse"
-                "gearlever"
-                "freefilesync"
-                "bottles"
-            )
-            ;;
-        script)
-            OPTIONS_DESC=(
-                "OpenCode - AI 代码助手"
-            )
-            OPTIONS_KEYS=(
-                "opencode"
-            )
-            ;;
-        all)
-            OPTIONS_DESC=(
-                "Brave Browser (浏览器/AUR)"
-                "Google Chrome (浏览器/AUR)"
-                "VS Code (IDE/AUR)"
-                "Docker + Compose + NVIDIA GPU (开发/官方)"
-                "LazyDocker (Docker UI/官方)"
-                "uv - Python 包管理器 (开发/官方)"
-                "OpenCode - AI 代码助手 (开发/安装脚本)"
-                "Node.js v24 (开发/官方)"
-                "LocalSend - 局域网传输 (网络/Flatpak)"
-                "Telegram Desktop (通讯/官方)"
-                "Audacity - 音频编辑 (多媒体/官方)"
-                "Kdenlive - 视频编辑 (多媒体/官方)"
-                "LosslessCut - 视频处理 (多媒体/Flatpak)"
-                "Czkawka - 重复文件清理 (系统/Flatpak)"
-                "FSearch - 文件搜索 (系统/Flatpak)"
-                "Warehouse - Flatpak 管理 (系统/Flatpak)"
-                "GearLever - Flatpak/EXE 启动器 (系统/Flatpak)"
-                "BackInTime - 备份工具 (系统/AUR)"
-                "Shelly - Arch 包管理器 (系统/AUR)"
-                "FreeFileSync - 文件同步 (系统/Flatpak)"
-                "Bottles - Windows 兼容层 (游戏/Flatpak)"
-            )
-            OPTIONS_KEYS=(
-                "brave"
-                "chrome"
-                "vscode"
-                "docker"
-                "lazydocker"
-                "uv"
-                "nodejs"
-                "localsend"
-                "telegram"
-                "audacity"
-                "kdenlive"
-                "losslesscut"
-                "czkawka"
-                "fsearch"
-                "warehouse"
-                "gearlever"
-                "backintime"
-                "shelly"
-                "freefilesync"
-                "bottles"
-                "opencode"
-            )
-            ;;
-    esac
-
-    case "$source" in
-        official) TITLE="官方仓库 (pacman)" ;;
-        aur) TITLE="AUR (paru)" ;;
-        flatpak) TITLE="Flatpak" ;;
-        script) TITLE="安装脚本" ;;
-        all) TITLE="全部软件" ;;
-esac
-}
-
-install_brave() {
-    log_step "安装 Brave Browser..."
-    ensure_paru
-    if pacman -Q brave-bin &>/dev/null; then
-        log_warn "Brave Browser 已安装, 跳过"
-        return
-    fi
-    paru -S --noconfirm brave-bin
-    log_info "Brave Browser 安装完成"
-}
-
-install_chrome() {
-    log_step "安装 Google Chrome..."
-    ensure_paru
-    if pacman -Q google-chrome &>/dev/null; then
-        log_warn "Google Chrome 已安装, 跳过"
-        return
-    fi
-    paru -S --noconfirm google-chrome
-    log_info "Google Chrome 安装完成"
-}
-
-install_vscode() {
-    log_step "安装 VS Code..."
-    ensure_paru
-    if pacman -Q code &>/dev/null; then
-        log_warn "VS Code 已安装, 跳过"
-        return
-    fi
-    if pacman -Si code &>/dev/null; then
-        sudo pacman -S --noconfirm code
-    else
-        paru -S --noconfirm visual-studio-code-bin
-    fi
-    log_info "VS Code 安装完成"
-}
-
-install_docker() {
-    log_step "安装 Docker + Docker Compose + Buildx..."
-    if pacman -Q docker &>/dev/null; then
-        log_warn "Docker 已安装"
-    else
-        sudo pacman -S --noconfirm docker docker-compose docker-buildx
-        sudo systemctl enable docker.service
-        sudo systemctl start docker.service
-        sudo usermod -aG docker "$USER"
-        log_info "Docker 安装完成 (需重新登录以使用 docker 组)"
-    fi
-    if [[ ! -f /etc/docker/daemon.json ]] || ! grep -q "registry-mirrors" /etc/docker/daemon.json 2>/dev/null; then
-        echo ""
-        if yes_no "是否配置 Docker 镜像加速源？" "n"; then
-            sudo tee /etc/docker/daemon.json <<'EOF'
-{
-    "registry-mirrors": [
-        "https://docker.1ms.run",
-        "https://docker.1panel.live",
-        "https://hub.rat.dev",
-        "https://dockerproxy.net",
-        "https://docker-registry.nmqu.com"
-    ]
-}
-EOF
-            sudo systemctl restart docker
-            log_info "Docker 镜像加速源已配置"
-        fi
-    fi
-    if command -v nvidia-smi &>/dev/null; then
-        if ! pacman -Q nvidia-container-toolkit &>/dev/null; then
-            if yes_no "检测到 NVIDIA 驱动，是否安装 Docker GPU 支持？" "y"; then
-                sudo pacman -S --noconfirm nvidia-container-toolkit
-                sudo nvidia-ctk runtime configure --runtime=docker
-                sudo systemctl restart docker
-                log_info "NVIDIA Container Toolkit 安装完成"
-            fi
-        else
-            log_info "NVIDIA GPU 支持已配置"
-        fi
-    fi
-}
-
-install_lazydocker() {
-    log_step "安装 LazyDocker..."
-    if pacman -Q lazydocker &>/dev/null; then
-        log_warn "LazyDocker 已安装, 跳过"
-        return
-    fi
-    sudo pacman -S --noconfirm lazydocker
-    log_info "LazyDocker 安装完成"
-}
-
-install_uv() {
-    log_step "安装 uv (Python 包管理器)..."
-    if pacman -Q uv &>/dev/null; then
-        log_warn "uv 已安装, 跳过"
-        return
-    fi
-    sudo pacman -S --noconfirm uv
-    log_info "uv 安装完成"
-}
-
-install_opencode() {
-    log_step "安装 OpenCode (AI 代码助手)..."
-    if ! command -v opencode &>/dev/null; then
-        log_info "尝试安装 OpenCode..."
-        if curl -fsSL https://opencode.ai/install | bash 2>/dev/null; then
-            log_info "OpenCode 安装成功"
-        else
-            log_warn "官方安装失败，尝试通过 npm 安装..."
-            if command -v npm &>/dev/null; then
-                npm i -g opencode-ai || log_error "npm 安装失败"
-            else
-                log_error "未找到 npm，请先安装 Node.js"
-                return
-            fi
-        fi
-    else
-        log_warn "OpenCode 已安装, 跳过"
-    fi
-    local config_src="${SCRIPT_DIR}/opencode"
-    local config_dest="$HOME/.config/opencode"
-    if [[ -d "$config_src" ]]; then
-        mkdir -p "$config_dest"
-        local total_files=$(find "$config_src" -type f | wc -l)
-        while IFS= read -r -d '' src_file; do
-            local rel_path="${src_file#$config_src/}"
-            local dest_file="$config_dest/$rel_path"
-            local dest_dir=$(dirname "$dest_file")
-            mkdir -p "$dest_dir"
-            cp "$src_file" "$dest_file"
-            log_info "部署配置文件: $rel_path"
-        done < <(find "$config_src" -type f -print0)
-    fi
-}
-
-install_nodejs() {
-    log_step "安装 Node.js (通过 nvm)..."
-    if [[ -d "$HOME/.config/nvm" ]] || [[ -d "$HOME/.nvm" ]]; then
-        log_info "nvm 已存在"
-    else
-        export NVM_DIR="$HOME/.config/nvm"
-        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-        log_info "nvm 安装完成"
-    fi
-    if [[ -d "$HOME/.config/nvm" ]]; then
-        export NVM_DIR="$HOME/.config/nvm"
-    else
-        export NVM_DIR="$HOME/.nvm"
-    fi
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    if nvm list 24 2>&1 | grep -q "v24"; then
-        log_warn "Node.js 24 已安装"
-    else
-        nvm install 24
-        nvm alias default 24
-        nvm use 24
-    fi
-    log_info "Node.js 安装完成 ($(node -v), npm $(npm -v))"
-}
-
-install_audacity() {
-    log_step "安装 Audacity..."
-    if pacman -Q audacity &>/dev/null; then
-        log_warn "Audacity 已安装, 跳过"
-        return
-    fi
-    sudo pacman -S --noconfirm audacity
-    log_info "Audacity 安装完成"
-}
-
-install_bottles() {
-    log_step "安装 Bottles (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q com.usebottles.Bottles; then
-        log_warn "Bottles 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub com.usebottles.Bottles
-    log_info "Bottles 安装完成"
-}
-
-install_freefilesync() {
-    log_step "安装 FreeFileSync (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q org.freefilesync.FreeFileSync; then
-        log_warn "FreeFileSync 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub org.freefilesync.FreeFileSync
-    log_info "FreeFileSync 安装完成"
-}
-
-install_kdenlive() {
-    log_step "安装 Kdenlive..."
-    if pacman -Q kdenlive &>/dev/null; then
-        log_warn "Kdenlive 已安装, 跳过"
-        return
-    fi
-    sudo pacman -S --noconfirm kdenlive
-    log_info "Kdenlive 安装完成"
-}
-
-install_localsend() {
-    log_step "安装 LocalSend (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q org.localsend.localsend_app; then
-        log_warn "LocalSend 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub org.localsend.localsend_app
-    log_info "LocalSend 安装完成"
-}
-
-install_losslesscut() {
-    log_step "安装 LosslessCut (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q no.mifi.losslesscut; then
-        log_warn "LosslessCut 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub no.mifi.losslesscut
-    log_info "LosslessCut 安装完成"
-}
-
-install_telegram() {
-    log_step "安装 Telegram Desktop..."
-    if pacman -Q telegram-desktop &>/dev/null; then
-        log_warn "Telegram 已安装, 跳过"
-        return
-    fi
-    sudo pacman -S --noconfirm telegram-desktop
-    log_info "Telegram 安装完成"
-}
-
-install_czkawka() {
-    log_step "安装 Czkawka (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q com.github.qarmin.czkawka; then
-        log_warn "Czkawka 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub com.github.qarmin.czkawka
-    log_info "Czkawka 安装完成"
-}
-
-install_backintime() {
-    log_step "安装 BackInTime..."
-    ensure_paru
-    if pacman -Q backintime &>/dev/null; then
-        log_warn "BackInTime 已安装, 跳过"
-        return
-    fi
-    paru -S --noconfirm backintime
-    log_info "BackInTime 安装完成"
-}
-
-install_shelly() {
-    log_step "安装 Shelly..."
-    ensure_paru
-    if pacman -Q shelly-bin &>/dev/null; then
-        log_warn "Shelly 已安装, 跳过"
-        return
-    fi
-    paru -S --noconfirm shelly-bin
-    log_info "Shelly 安装完成"
-}
-
-install_fsearch() {
-    log_step "安装 FSearch (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q io.github.cboxdoerfer.FSearch; then
-        log_warn "FSearch 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub io.github.cboxdoerfer.FSearch
-    log_info "FSearch 安装完成"
-}
-
-install_warehouse() {
-    log_step "安装 Warehouse (Flatpak)..."
-    ensure_flatpak
-    if flatpak list | grep -q io.github.flattool.Warehouse; then
-        log_warn "Warehouse 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub io.github.flattool.Warehouse
-    log_info "Warehouse 安装完成"
-}
-
-install_gearlever() {
-    log_step "安装 GearLever (Flatpak/EXE 启动器)..."
-    ensure_flatpak
-    if flatpak list | grep -q it.mijorus.gearlever; then
-        log_warn "GearLever 已安装, 跳过"
-        return
-    fi
-    flatpak install -y flathub it.mijorus.gearlever
-    log_info "GearLever 安装完成"
 }
 
 run_menu() {
-    FINAL_SELECTED=()
-    show_main_menu
-    show_submenu "$SOURCE"
-
-    mapfile -t SELECTED < <(fzf_multiselect "$TITLE" "${OPTIONS_DESC[@]}") || { log_info "已取消"; return; }
-
-    [[ ${#SELECTED[@]} -eq 0 ]] && { log_info "未选择任何软件, 退出"; return; }
-
-    declare -A KEY_MAP
-    for i in "${!OPTIONS_DESC[@]}"; do
-        KEY_MAP["${OPTIONS_DESC[$i]}"]="${OPTIONS_KEYS[$i]}"
+    show_cat_menu || return
+    
+    OPTIONS_KEYS=()
+    OPTIONS_DESC=()
+    get_options "$SOURCE"
+    
+    [[ ${#OPTIONS_KEYS[@]} -eq 0 ]] && { log_warn "该分类暂无软件"; return; }
+    
+    mapfile -t SELECTED < <(fzf_multiselect "$TITLE" "${OPTIONS_DESC[@]}") || return
+    
+    [[ ${#SELECTED[@]} -eq 0 ]] && { log_warn "未选择任何软件"; return; }
+    
+    declare -a FINAL_SELECTED APP_SOURCES
+    declare -A DESC_TO_KEY
+    for i in "${!OPTIONS_KEYS[@]}"; do
+        DESC_TO_KEY["${OPTIONS_DESC[$i]}"]="${OPTIONS_KEYS[$i]}"
     done
-
-    FINAL_SELECTED=()
+    
     for item in "${SELECTED[@]}"; do
-        FINAL_SELECTED+=("${KEY_MAP[$item]}")
+        key="${DESC_TO_KEY[$item]}"
+        FINAL_SELECTED+=("$key")
+        if [[ "$SOURCE" == "all" ]]; then
+            APP_SOURCES+=("$(get_source_by_name "$key")")
+        else
+            APP_SOURCES+=("$SOURCE")
+        fi
     done
 
-    echo ""
-    log_info "已选择: ${FINAL_SELECTED[*]}"
-    echo ""
-    if ! yes_no "确认开始安装？" "y"; then
-        log_info "已取消"
-        return
-    fi
-
-    for app in "${FINAL_SELECTED[@]}"; do
-        case "$app" in
-            brave)        install_brave ;;
-            chrome)       install_chrome ;;
-            vscode)       install_vscode ;;
-            docker)       install_docker ;;
-            lazydocker)   install_lazydocker ;;
-            uv)           install_uv ;;
-            nodejs)       install_nodejs ;;
-            opencode)     install_opencode ;;
-            audacity)     install_audacity ;;
-            bottles)      install_bottles ;;
-            freefilesync) install_freefilesync ;;
-            kdenlive)     install_kdenlive ;;
-            localsend)    install_localsend ;;
-            losslesscut)  install_losslesscut ;;
-            telegram)    install_telegram ;;
-            czkawka)     install_czkawka ;;
-            backintime)   install_backintime ;;
-            shelly)      install_shelly ;;
-            fsearch)     install_fsearch ;;
-            warehouse)   install_warehouse ;;
-            gearlever)   install_gearlever ;;
-            *)          log_warn "未知选项: $app" ;;
+    log_info "安装: ${FINAL_SELECTED[*]}"
+    
+    for i in "${!FINAL_SELECTED[@]}"; do
+        app="${FINAL_SELECTED[$i]}"
+        src="${APP_SOURCES[$i]}"
+        
+        case "$src" in
+            aur) ensure_paru ;;
+            flatpak) ensure_flatpak ;;
         esac
+        
+        log_step "安装 $app..."
+        cmd=$(get_install_cmd "$app" "$src")
+        eval "$cmd"
+        log_info "$app 安装成功"
     done
+    
+    echo ""
+    echo -e "${GREEN}✓ 安装完成${NC}"
+    sleep 1
 }
 
-while true; do
-    run_menu
-    echo ""
-    if ! yes_no "继续安装其他软件？" "y"; then
-        log_step "安装完成，再见!"
-        break
+main() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_error "配置文件不存在: $CONFIG_FILE"
+        exit 1
     fi
-done
+    
+    echo -e "${YELLOW}加载软件列表并检测安装状态...${NC}"
+    load_packages
+    
+    while true; do
+        run_menu || break
+    done
+    
+    echo ""
+    echo -e "${CYAN}已退出，再见！${NC}"
+}
+
+main "$@"
