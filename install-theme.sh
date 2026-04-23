@@ -256,6 +256,65 @@ install_lxappearance() {
 }
 
 # -------------------- GTK 配置相关 --------------------
+scan_local_themes() {
+    local themes=()
+    if [[ -d "$SCRIPT_DIR/themes" ]]; then
+        for f in "$SCRIPT_DIR/themes"/*; do
+            [[ -f "$f" ]] && themes+=("$(basename "$f")")
+        done
+    fi
+    printf '%s\n' "${themes[@]}" | sort
+}
+
+scan_local_icons() {
+    local icons=()
+    if [[ -d "$SCRIPT_DIR/icons" ]]; then
+        for f in "$SCRIPT_DIR/icons"/*; do
+            [[ -f "$f" ]] && icons+=("$(basename "$f")")
+        done
+    fi
+    printf '%s\n' "${icons[@]}" | sort
+}
+
+install_theme_tarball() {
+    local tarball="$1"
+    local name="${tarball%.tar.*}"
+    local ext="${tarball##*.}"
+    local target_dir="$HOME/.local/share/themes"
+    
+    case "$ext" in
+        gz)  [[ "$tarball" == *.tar.gz ]] && ext="tar.gz" ;;
+        xz)  ext="tar.xz" ;;
+    esac
+    
+    local src="$SCRIPT_DIR/themes/$tarball"
+    if [[ ! -f "$src" ]]; then
+        src="$SCRIPT_DIR/icons/$tarball"
+        target_dir="$HOME/.local/share/icons"
+    fi
+    
+    if [[ ! -f "$src" ]]; then
+        log_error "文件不存在: $tarball"
+        return 1
+    fi
+    
+    mkdir -p "$target_dir"
+    case "$ext" in
+        tar.gz|tgz)
+            tar -xzf "$src" -C "$target_dir/" ;;
+        tar.xz|txz)
+            tar -xJf "$src" -C "$target_dir/" ;;
+        zip)
+            unzip -q "$src" -d "$target_dir/" ;;
+        *)
+            log_error "不支持的格式: $ext"
+            return 1
+    esac
+    
+    fc-cache -f -v "$target_dir" 2>/dev/null || true
+    log_info "已安装: $tarball -> $target_dir"
+}
+
 get_available_themes() {
     local themes=()
     if [[ -d /usr/share/themes ]]; then
@@ -312,41 +371,22 @@ configure_gtk_manual() {
         return 1
     fi
 
-    # 选择主题
     echo ""
-    echo "可用主题列表:"
-    for i in "${!themes[@]}"; do
-        printf "  %2d) %s\n" $((i+1)) "${themes[$i]}"
-    done
-    echo "----------------------------------------"
-    read -p "请选择主题编号 (直接回车跳过): " theme_idx
-    if [[ -z "$theme_idx" ]]; then
+    echo "选择 GTK 主题:"
+    local theme_choice
+    theme_choice=$(printf '%s\n' "${themes[@]}" | fzf --height=15 --prompt="选择主题: ")
+    if [[ -z "$theme_choice" ]]; then
         log_warn "未选择主题，跳过 GTK 配置"
         return 0
     fi
-    if [[ ! "$theme_idx" =~ ^[0-9]+$ ]] || [ "$theme_idx" -lt 1 ] || [ "$theme_idx" -gt ${#themes[@]} ]; then
-        log_error "无效选择"
-        return 1
-    fi
-    local theme_choice="${themes[$((theme_idx-1))]}"
 
-    # 选择图标
-    echo ""
-    echo "可用图标列表:"
-    for i in "${!icons[@]}"; do
-        printf "  %2d) %s\n" $((i+1)) "${icons[$i]}"
-    done
-    echo "----------------------------------------"
-    read -p "请选择图标主题编号 (直接回车跳过): " icon_idx
-    if [[ -z "$icon_idx" ]]; then
+    echo "选择图标主题:"
+    local icon_choice
+    icon_choice=$(printf '%s\n' "${icons[@]}" | fzf --height=15 --prompt="选择图标: ")
+    if [[ -z "$icon_choice" ]]; then
         log_warn "未选择图标，跳过 GTK 配置"
         return 0
     fi
-    if [[ ! "$icon_idx" =~ ^[0-9]+$ ]] || [ "$icon_idx" -lt 1 ] || [ "$icon_idx" -gt ${#icons[@]} ]; then
-        log_error "无效选择"
-        return 1
-    fi
-    local icon_choice="${icons[$((icon_idx-1))]}"
 
     log_info "应用主题: $theme_choice"
     log_info "应用图标: $icon_choice"
@@ -430,17 +470,25 @@ interactive_menu() {
     log_info "脚本目录: $SCRIPT_DIR"
 
     local options=()
+    local theme_files=()
+    local icon_files=()
 
-    [[ -f "$SCRIPT_DIR/themes/mint-themes.tar.gz" ]] && options+=("mint-themes:Mint-Y 主题 (本地 tarball)")
-    [[ -f "$SCRIPT_DIR/icons/Nordzy.tar.gz" ]] && options+=("nordic-icons:Nordic 图标 (本地 tarball)")
-    [[ -f "$SCRIPT_DIR/icons/Catppuccin-Mocha.tar.gz" ]] && options+=("catppuccin-icons:Catppuccin 图标 (本地 tarball)")
-    [[ -f "$SCRIPT_DIR/themes/Nordic-v40.tar.xz" ]] && options+=("nordic-themes:Nordic 主题 (本地 tar.xz)")
+    mapfile -t theme_files < <(scan_local_themes)
+    mapfile -t icon_files < <(scan_local_icons)
 
-    options+=("catppuccin-aur:Catppuccin AUR 包 (GTK/光标/Fcitx5/Qt5ct)")
+    for tf in "${theme_files[@]}"; do
+        [[ -n "$tf" ]] && options+=("theme:$tf")
+    done
+
+    for if in "${icon_files[@]}"; do
+        [[ -n "$if" ]] && options+=("icon:$if")
+    done
+
+    options+=("catppuccin-aur:Catppuccin AUR")
     options+=("mint-y-icons:Mint-Y 图标 (AUR)")
-    options+=("lxappearance:lxappearance 主题配置工具")
-    options+=("gtk-config:GTK 主题和图标配置")
-    options+=("nemo-default:Nemo 默认文件管理器")
+    options+=("lxappearance:lxappearance")
+    options+=("gtk-config:GTK 配置")
+    options+=("nemo-default:Nemo 默认")
 
     if ! command -v fzf &>/dev/null; then
         log_warn "未找到 fzf，尝试安装..."
@@ -448,10 +496,10 @@ interactive_menu() {
     fi
 
     local IFS=$'\n'
-    local selected=$(for opt in "${options[@]}"; do echo "$opt"; done | fzf --height=15 --multi --prompt="选择安装项目: " --preview='echo "{1}: {2}" | cut -d: -f2' --preview-window=up:3)
+    local selected=$(for opt in "${options[@]}"; do echo "$opt"; done | fzf --height=20 --multi --prompt="选择 (Tab多选): ")
 
     if [[ -z "$selected" ]]; then
-        log_info "未选择任何操作，退出"
+        log_info "未选择，退出"
         return 0
     fi
 
@@ -460,42 +508,19 @@ interactive_menu() {
         [[ -n "$line" ]] && selected_keys+=("${line%%:*}")
     done <<< "$selected"
 
-    echo ""
-    echo "即将执行以下操作:"
     for key in "${selected_keys[@]}"; do
         case "$key" in
-            mint-themes)       echo "  - Mint-Y 主题 (本地 tarball)" ;;
-            catppuccin-icons) echo "  - Catppuccin 图标 (本地 tarball)" ;;
-            catppuccin-aur)   echo "  - Catppuccin AUR 包 (GTK/光标/Fcitx5/Qt5ct)" ;;
-            mint-y-icons)      echo "  - Mint-Y 图标 (AUR)" ;;
-            nordic-icons)     echo "  - Nordic 图标 (本地 tarball)" ;;
-            nordic-themes)   echo "  - Nordic 主题 (本地 tarball)" ;;
-            lxappearance)    echo "  - lxappearance 主题配置工具" ;;
-            gtk-config)      echo "  - GTK 主题和图标配置" ;;
-            nemo-default)   echo "  - Nemo 默认文件管理器" ;;
-        esac
-    done
-
-    if ! yes_no "确认继续？" "y"; then
-        log_info "已取消"
-        return 0
-    fi
-
-    for key in "${selected_keys[@]}"; do
-        case "$key" in
-            mint-themes)       install_mint_themes_from_tarball ;;
-            catppuccin-icons) install_catppuccin_icons_from_tarball ;;
+            theme:*)      install_theme_tarball "${key#theme:}" ;;
+            icon:*)       install_theme_tarball "${key#icon:}" ;;
             catppuccin-aur)   install_catppuccin_aur_packages ;;
-            mint-y-icons)      install_mint_icons_from_aur ;;
-            nordic-icons)     install_nordic_icons_from_tarball ;;
-            nordic-themes)     install_nordic_themes_from_tarball ;;
-            lxappearance)     install_lxappearance ;;
-            gtk-config)       configure_gtk_manual ;;
-            nemo-default)    set_nemo_default ;;
+            mint-y-icons)    install_mint_icons_from_aur ;;
+            lxappearance)  install_lxappearance ;;
+            gtk-config)    configure_gtk_manual ;;
+            nemo-default) set_nemo_default ;;
         esac
     done
 
-    log_step "所有操作完成!"
+    interactive_menu
 }
 
 main() {
@@ -515,13 +540,24 @@ main() {
     fi
 
     if [[ "${1:-}" == "--auto" ]]; then
+        local theme_files=()
+        local icon_files=()
+        
+        mapfile -t theme_files < <(scan_local_themes)
+        mapfile -t icon_files < <(scan_local_icons)
+        
         install_lxappearance
-        install_mint_themes_from_tarball
-        install_catppuccin_icons_from_tarball
+        
+        for tf in "${theme_files[@]}"; do
+            [[ -n "$tf" ]] && install_theme_tarball "$tf"
+        done
+        
+        for if in "${icon_files[@]}"; do
+            [[ -n "$if" ]] && install_theme_tarball "$if"
+        done
+        
         install_catppuccin_aur_packages
         install_mint_icons_from_aur
-        install_nordic_icons_from_tarball
-        install_nordic_themes_from_tarball
         configure_gtk_manual
     else
         interactive_menu
