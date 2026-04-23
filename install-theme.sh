@@ -420,135 +420,45 @@ interactive_menu() {
     echo -e "${CYAN}========================================${NC}"
     echo ""
 
-    # === 稳健的路径解析 ===
-    # 优先使用 BASH_SOURCE，回退到 $0
     local script_path="${BASH_SOURCE[0]:-$0}"
-    # 解析真实路径（如果是软链接）
     if command -v realpath &>/dev/null; then
         SCRIPT_DIR="$(realpath "$(dirname "$script_path")")"
     else
         SCRIPT_DIR="$(cd "$(dirname "$script_path")" && pwd -P)"
     fi
 
-    log_info "脚本真实目录: $SCRIPT_DIR"
+    log_info "脚本目录: $SCRIPT_DIR"
 
-    # 定义可选操作及其描述
-    local operations=(
-        "mint-themes:安装 Mint-Y 主题 (本地 tarball)"
-        "catppuccin-icons:安装 Catppuccin 图标 (本地 tarball)"
-        "catppuccin-aur:安装 Catppuccin AUR 包"
-        "mint-y-icons:安装 Mint-Y 图标 (AUR)"
-        "nordic-icons:安装 Nordic 图标 (本地 tarball)"
-        "nordic-themes:安装 Nordic 主题 (本地 tarball)"
-        "lxappearance:安装 lxappearance 主题配置工具"
-        "gtk-config:配置 GTK 主题和图标"
-        "nemo-default:设置 Nemo 为默认文件管理器"
-    )
+    local options=()
 
-    local available_ops=()
-    local available_keys=()
+    [[ -f "$SCRIPT_DIR/themes/mint-themes.tar.gz" ]] && options+=("mint-themes:Mint-Y 主题 (本地 tarball)")
+    [[ -f "$SCRIPT_DIR/icons/Nordzy.tar.gz" ]] && options+=("nordic-icons:Nordic 图标 (本地 tarball)")
+    [[ -f "$SCRIPT_DIR/icons/Catppuccin-Mocha.tar.gz" ]] && options+=("catppuccin-icons:Catppuccin 图标 (本地 tarball)")
+    [[ -f "$SCRIPT_DIR/themes/Nordic-v40.tar.xz" ]] && options+=("nordic-themes:Nordic 主题 (本地 tar.xz)")
 
-    echo ""
-    echo "检查本地主题包:"
-    
-    # 检查 Mint 主题
-    local mint_theme_file="$SCRIPT_DIR/themes/mint-themes.tar.gz"
-    if [[ -f "$mint_theme_file" ]]; then
-        echo "  ✓ 找到: $mint_theme_file"
-        available_ops+=("Mint-Y 主题 (本地)")
-        available_keys+=("mint-themes")
-    else
-        echo "  ✗ 未找到: $mint_theme_file"
+    options+=("catppuccin-aur:Catppuccin AUR 包 (GTK/光标/Fcitx5/Qt5ct)")
+    options+=("mint-y-icons:Mint-Y 图标 (AUR)")
+    options+=("lxappearance:lxappearance 主题配置工具")
+    options+=("gtk-config:GTK 主题和图标配置")
+    options+=("nemo-default:Nemo 默认文件管理器")
+
+    if ! command -v fzf &>/dev/null; then
+        log_warn "未找到 fzf，尝试安装..."
+        sudo pacman -S --noconfirm fzf
     fi
 
-    # 检查 Nordic 图标
-    local nordic_icon_file="$SCRIPT_DIR/icons/Nordzy.tar.gz"
-    if [[ -f "$nordic_icon_file" ]]; then
-        echo "  ✓ 找到: $nordic_icon_file"
-        available_ops+=("Nordic 图标 (本地)")
-        available_keys+=("nordic-icons")
-    else
-        echo "  ✗ 未找到: $nordic_icon_file"
-    fi
+    local IFS=$'\n'
+    local selected=$(for opt in "${options[@]}"; do echo "$opt"; done | fzf --height=15 --multi --prompt="选择安装项目: " --preview='echo "{1}: {2}" | cut -d: -f2' --preview-window=up:3)
 
-    # 检查 Catppuccin 图标
-    local catppuccin_icon_file="$SCRIPT_DIR/icons/Catppuccin-Mocha.tar.gz"
-    if [[ -f "$catppuccin_icon_file" ]]; then
-        echo "  ✓ 找到 Catppuccin 图标包"
-        available_ops+=("Catppuccin 图标 (本地)")
-        available_keys+=("catppuccin-icons")
-    else
-        echo "  ✗ 未找到: $catppuccin_icon_file"
-    fi
-
-    # 检查 Nordic 主题
-    local nordic_theme_file="$SCRIPT_DIR/themes/Nordic-v40.tar.xz"
-    if [[ -f "$nordic_theme_file" ]]; then
-        echo "  ✓ 找到: $nordic_theme_file"
-        available_ops+=("Nordic 主题 (本地)")
-        available_keys+=("nordic-themes")
-    else
-        echo "  ✗ 未找到: $nordic_theme_file"
-    fi
-
-    # 添加不依赖本地文件的操作
-    available_ops+=(
-        "Catppuccin AUR 包"
-        "Mint-Y 图标 (AUR)"
-        "lxappearance 配置工具"
-        "GTK 主题配置"
-        "Nemo 默认文件管理器"
-    )
-    available_keys+=(
-        "catppuccin-aur"
-        "mint-y-icons"
-        "lxappearance"
-        "gtk-config"
-        "nemo-default"
-    )
-
-    echo ""
-    echo "========================================"
-    echo "  可选操作列表"
-    echo "========================================"
-    for i in "${!available_ops[@]}"; do
-        printf "  %2d) %s\n" $((i+1)) "${available_ops[$i]}"
-    done
-    echo "----------------------------------------"
-    echo "  输入编号选择 (多个用逗号分隔，如 1,3,4)"
-    echo "  输入 'all' 全选，直接回车退出"
-    echo "----------------------------------------"
-    read -p "你的选择: " choice
-
-    if [[ -z "$choice" ]]; then
+    if [[ -z "$selected" ]]; then
         log_info "未选择任何操作，退出"
         return 0
     fi
 
-    local selected_indices=()
-    if [[ "$choice" == "all" ]]; then
-        for ((i=0; i<${#available_keys[@]}; i++)); do
-            selected_indices+=($((i+1)))
-        done
-    else
-        IFS=',' read -ra nums <<< "$choice"
-        for num in "${nums[@]}"; do
-            num=$(echo "$num" | xargs)
-            if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le ${#available_keys[@]} ]; then
-                selected_indices+=("$num")
-            fi
-        done
-    fi
-
-    if [[ ${#selected_indices[@]} -eq 0 ]]; then
-        log_error "没有有效的选择"
-        return 1
-    fi
-
     local selected_keys=()
-    for idx in "${selected_indices[@]}"; do
-        selected_keys+=("${available_keys[$((idx-1))]}")
-    done
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && selected_keys+=("${line%%:*}")
+    done <<< "$selected"
 
     echo ""
     echo "即将执行以下操作:"
@@ -586,10 +496,8 @@ interactive_menu() {
     done
 
     log_step "所有操作完成!"
-    press_enter
 }
 
-# -------------------- 主入口 --------------------
 main() {
     if [[ "${1:-}" == "--help" ]]; then
         echo "用法: $0 [选项]"
