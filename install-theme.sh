@@ -553,7 +553,17 @@ interactive_menu() {
     echo ""
     echo "即将执行以下操作:"
     for key in "${selected_keys[@]}"; do
-        echo "  - $key"
+        case "$key" in
+            mint-themes)       echo "  - Mint-Y 主题 (本地 tarball)" ;;
+            catppuccin-icons) echo "  - Catppuccin 图标 (本地 tarball)" ;;
+            catppuccin-aur)   echo "  - Catppuccin AUR 包 (GTK/光标/Fcitx5/Qt5ct)" ;;
+            mint-y-icons)      echo "  - Mint-Y 图标 (AUR)" ;;
+            nordic-icons)     echo "  - Nordic 图标 (本地 tarball)" ;;
+            nordic-themes)   echo "  - Nordic 主题 (本地 tarball)" ;;
+            lxappearance)    echo "  - lxappearance 主题配置工具" ;;
+            gtk-config)      echo "  - GTK 主题和图标配置" ;;
+            nemo-default)   echo "  - Nemo 默认文件管理器" ;;
+        esac
     done
 
     if ! yes_no "确认继续？" "y"; then
