@@ -19,12 +19,6 @@ log_step()  { echo -e "\n${CYAN}==> $1${NC}"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# -------------------- 辅助交互函数 (纯 Bash) --------------------
-press_enter() {
-    echo ""
-    read -p "按回车键继续..."
-}
-
 yes_no() {
     local prompt="$1"
     local default="${2:-n}"
@@ -42,6 +36,27 @@ yes_no() {
             *) echo "请输入 y 或 n" ;;
         esac
     done
+}
+
+# 确保 fzf 可用
+ensure_fzf() {
+    if command -v fzf &>/dev/null; then
+        return 0
+    fi
+    log_warn "未找到 fzf，将尝试安装..."
+    if command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm fzf
+    elif command -v apt &>/dev/null; then
+        sudo apt install -y fzf
+    fi
+}
+
+# fzf 多选菜单
+fzf_multiselect() {
+    local title="$1"
+    shift
+    local items=("$@")
+    printf "%s\n" "${items[@]}" | fzf --multi --height=20 --prompt="选择软件 (Tab/空格多选, 回车确认): " --header="$title"
 }
 
 # 确保 paru 可用
@@ -81,39 +96,31 @@ ensure_flatpak() {
 
 show_main_menu() {
     clear
-    echo -e "${CYAN}========================================${NC}"
-    echo -e "${CYAN}     常用软件安装 (Arch Linux)${NC}"
-    echo -e "${CYAN}========================================${NC}"
-    echo ""
-    echo "  选择安装来源:"
-    echo ""
-    echo "  1) 官方仓库 (pacman)"
-    echo "  2) AUR (paru)"
-    echo "  3) Flatpak"
-    echo "  4) 安装脚本"
-    echo "  5) 全部软件"
-    echo ""
-    echo "----------------------------------------"
-    read -p "你的选择: " main_choice
-
-    case "$main_choice" in
-        1) SOURCE="official" ;;
-        2) SOURCE="aur" ;;
-        3) SOURCE="flatpak" ;;
-        4) SOURCE="script" ;;
-        5) SOURCE="all" ;;
+    ensure_fzf
+    local options=(
+        "官方仓库 (pacman)"
+        "AUR (paru)"
+        "Flatpak"
+        "安装脚本"
+        "全部软件"
+    )
+    local choice
+    choice=$(printf "%s\n" "${options[@]}" | fzf --height=12 --prompt="选择安装来源: ") || { log_info "已取消"; exit 0; }
+    [[ -z "$choice" ]] && { log_info "已取消"; exit 0; }
+    case "$choice" in
+        "官方仓库"*) SOURCE="official" ;;
+        "AUR"*) SOURCE="aur" ;;
+        "Flatpak"*) SOURCE="flatpak" ;;
+        "安装脚本"*) SOURCE="script" ;;
+        "全部软件"*) SOURCE="all" ;;
         *) log_error "无效选择"; exit 1 ;;
     esac
 }
 
 show_submenu() {
     local source="$1"
-    clear
-    echo -e "${CYAN}========================================${NC}"
-
     case "$source" in
         official)
-            echo -e "${CYAN}     官方仓库 (pacman)${NC}"
             OPTIONS_DESC=(
                 "Docker + Compose + NVIDIA GPU (开发)"
                 "LazyDocker (Docker UI)"
@@ -134,7 +141,6 @@ show_submenu() {
             )
             ;;
         aur)
-            echo -e "${CYAN}     AUR (paru)${NC}"
             OPTIONS_DESC=(
                 "Brave Browser (浏览器)"
                 "Google Chrome (浏览器)"
@@ -151,7 +157,6 @@ show_submenu() {
             )
             ;;
         flatpak)
-            echo -e "${CYAN}     Flatpak${NC}"
             OPTIONS_DESC=(
                 "LocalSend - 局域网传输 (网络)"
                 "LosslessCut - 视频处理 (多媒体)"
@@ -174,7 +179,6 @@ show_submenu() {
             )
             ;;
         script)
-            echo -e "${CYAN}     安装脚本${NC}"
             OPTIONS_DESC=(
                 "OpenCode - AI 代码助手"
             )
@@ -183,7 +187,6 @@ show_submenu() {
             )
             ;;
         all)
-            echo -e "${CYAN}     全部软件${NC}"
             OPTIONS_DESC=(
                 "Brave Browser (浏览器/AUR)"
                 "Google Chrome (浏览器/AUR)"
@@ -233,58 +236,14 @@ show_submenu() {
             ;;
     esac
 
-    echo -e "${CYAN}========================================${NC}"
-    echo ""
-    echo "可选软件列表:"
-    echo ""
-    for i in "${!OPTIONS_DESC[@]}"; do
-        printf "  %2d) %s\n" $((i+1)) "${OPTIONS_DESC[$i]}"
-    done
-    echo ""
-    echo "----------------------------------------"
-    echo "  输入编号选择 (多个用逗号分隔，如 1,3,4)"
-    echo "  输入 'all' 全选，直接回车退出"
-    echo "----------------------------------------"
-    read -p "你的选择: " choice
+    case "$source" in
+        official) TITLE="官方仓库 (pacman)" ;;
+        aur) TITLE="AUR (paru)" ;;
+        flatpak) TITLE="Flatpak" ;;
+        script) TITLE="安装脚本" ;;
+        all) TITLE="全部软件" ;;
+esac
 }
-
-show_main_menu
-show_submenu "$SOURCE"
-
-if [[ -z "$choice" ]]; then
-    log_warn "未选择任何软件, 退出"
-    exit 0
-fi
-
-SELECTED=()
-if [[ "$choice" == "all" ]]; then
-    SELECTED=("${OPTIONS_KEYS[@]}")
-else
-    IFS=',' read -ra nums <<< "$choice"
-    for num in "${nums[@]}"; do
-        num=$(echo "$num" | xargs)
-        if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le ${#OPTIONS_KEYS[@]} ]; then
-            SELECTED+=("${OPTIONS_KEYS[$((num-1))]}")
-        fi
-    done
-fi
-
-if [[ ${#SELECTED[@]} -eq 0 ]]; then
-    log_error "没有有效的选择"
-    exit 1
-fi
-
-echo ""
-log_info "已选择: ${SELECTED[*]}"
-echo ""
-if ! yes_no "确认开始安装？" "y"; then
-    log_info "已取消"
-    exit 0
-fi
-
-# ============================================================
-# 安装函数 (Arch 版本) - 保持原有实现不变
-# ============================================================
 
 install_brave() {
     log_step "安装 Brave Browser..."
@@ -334,7 +293,6 @@ install_docker() {
         sudo usermod -aG docker "$USER"
         log_info "Docker 安装完成 (需重新登录以使用 docker 组)"
     fi
-
     if [[ ! -f /etc/docker/daemon.json ]] || ! grep -q "registry-mirrors" /etc/docker/daemon.json 2>/dev/null; then
         echo ""
         if yes_no "是否配置 Docker 镜像加速源？" "n"; then
@@ -353,7 +311,6 @@ EOF
             log_info "Docker 镜像加速源已配置"
         fi
     fi
-
     if command -v nvidia-smi &>/dev/null; then
         if ! pacman -Q nvidia-container-toolkit &>/dev/null; then
             if yes_no "检测到 NVIDIA 驱动，是否安装 Docker GPU 支持？" "y"; then
@@ -390,7 +347,6 @@ install_uv() {
 
 install_opencode() {
     log_step "安装 OpenCode (AI 代码助手)..."
-
     if ! command -v opencode &>/dev/null; then
         log_info "尝试安装 OpenCode..."
         if curl -fsSL https://opencode.ai/install | bash 2>/dev/null; then
@@ -407,7 +363,6 @@ install_opencode() {
     else
         log_warn "OpenCode 已安装, 跳过"
     fi
-
     local config_src="${SCRIPT_DIR}/opencode"
     local config_dest="$HOME/.config/opencode"
     if [[ -d "$config_src" ]]; then
@@ -433,14 +388,12 @@ install_nodejs() {
         curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
         log_info "nvm 安装完成"
     fi
-
     if [[ -d "$HOME/.config/nvm" ]]; then
         export NVM_DIR="$HOME/.config/nvm"
     else
         export NVM_DIR="$HOME/.nvm"
     fi
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
     if nvm list 24 2>&1 | grep -q "v24"; then
         log_warn "Node.js 24 已安装"
     else
@@ -514,8 +467,6 @@ install_losslesscut() {
     flatpak install -y flathub no.mifi.losslesscut
     log_info "LosslessCut 安装完成"
 }
-
-
 
 install_telegram() {
     log_step "安装 Telegram Desktop..."
@@ -593,38 +544,66 @@ install_gearlever() {
     log_info "GearLever 安装完成"
 }
 
-# ============================================================
-# 执行安装
-# ============================================================
-for app in "${SELECTED[@]}"; do
-    case "$app" in
-        brave)        install_brave ;;
-        chrome)       install_chrome ;;
-        vscode)       install_vscode ;;
-        docker)       install_docker ;;
-        lazydocker)   install_lazydocker ;;
-        uv)           install_uv ;;
-        nodejs)       install_nodejs ;;
-        opencode)     install_opencode ;;
-        audacity)     install_audacity ;;
-        bottles)      install_bottles ;;
-        freefilesync) install_freefilesync ;;
-        kdenlive)     install_kdenlive ;;
-        localsend)    install_localsend ;;
-        losslesscut)  install_losslesscut ;;
-        telegram)     install_telegram ;;
-        czkawka)      install_czkawka ;;
-        backintime)   install_backintime ;;
-        shelly)       install_shelly ;;
-        fsearch)      install_fsearch ;;
-        warehouse)    install_warehouse ;;
-        gearlever)    install_gearlever ;;
-        backintime)   install_backintime ;;
-        shelly)       install_shelly ;;
-        *)            log_warn "未知选项: $app" ;;
-    esac
-done
+run_menu() {
+    FINAL_SELECTED=()
+    show_main_menu
+    show_submenu "$SOURCE"
 
-log_step "安装完成!"
-echo ""
-log_info "提示: 如果安装了 Docker, 需要注销重新登录以使 docker 组权限生效"
+    mapfile -t SELECTED < <(fzf_multiselect "$TITLE" "${OPTIONS_DESC[@]}") || { log_info "已取消"; return; }
+
+    [[ ${#SELECTED[@]} -eq 0 ]] && { log_info "未选择任何软件, 退出"; return; }
+
+    declare -A KEY_MAP
+    for i in "${!OPTIONS_DESC[@]}"; do
+        KEY_MAP["${OPTIONS_DESC[$i]}"]="${OPTIONS_KEYS[$i]}"
+    done
+
+    FINAL_SELECTED=()
+    for item in "${SELECTED[@]}"; do
+        FINAL_SELECTED+=("${KEY_MAP[$item]}")
+    done
+
+    echo ""
+    log_info "已选择: ${FINAL_SELECTED[*]}"
+    echo ""
+    if ! yes_no "确认开始安装？" "y"; then
+        log_info "已取消"
+        return
+    fi
+
+    for app in "${FINAL_SELECTED[@]}"; do
+        case "$app" in
+            brave)        install_brave ;;
+            chrome)       install_chrome ;;
+            vscode)       install_vscode ;;
+            docker)       install_docker ;;
+            lazydocker)   install_lazydocker ;;
+            uv)           install_uv ;;
+            nodejs)       install_nodejs ;;
+            opencode)     install_opencode ;;
+            audacity)     install_audacity ;;
+            bottles)      install_bottles ;;
+            freefilesync) install_freefilesync ;;
+            kdenlive)     install_kdenlive ;;
+            localsend)    install_localsend ;;
+            losslesscut)  install_losslesscut ;;
+            telegram)    install_telegram ;;
+            czkawka)     install_czkawka ;;
+            backintime)   install_backintime ;;
+            shelly)      install_shelly ;;
+            fsearch)     install_fsearch ;;
+            warehouse)   install_warehouse ;;
+            gearlever)   install_gearlever ;;
+            *)          log_warn "未知选项: $app" ;;
+        esac
+    done
+}
+
+while true; do
+    run_menu
+    echo ""
+    if ! yes_no "继续安装其他软件？" "y"; then
+        log_step "安装完成，再见!"
+        break
+    fi
+done
