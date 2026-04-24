@@ -173,7 +173,10 @@ script:
       curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
       \. "$HOME/.config/nvm.sh"
       source "$HOME/.config/.bashrc"
+      readln -p "请输入要安装的 Node.js 版本（默认 25）: " node_version
+      node_version=${node_version:-25}
       nvm install 25
+      
     check: |
       if command -v node &>/dev/null && command -v npm &>/dev/null; then
         node -v | grep -q 'v25'
