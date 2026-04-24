@@ -171,10 +171,8 @@ script:
     desc: Node.js v25 (nvm/开发)
     install: |
       export NVM_DIR="$HOME/.config/nvm"
-      curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-      source "$NVM_DIR/nvm.sh" 2>/dev/null || true
-      nvm install 25
-      nvm alias default 25
+      bash -c 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash'
+      bash -c "source \"$NVM_DIR/nvm.sh\" && nvm install 25 && nvm alias default 25"
     check: |
       export NVM_DIR="$HOME/.config/nvm"
       source "$NVM_DIR/nvm.sh" 2>/dev/null
