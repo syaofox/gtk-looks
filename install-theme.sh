@@ -271,6 +271,38 @@ install_lxappearance() {
     log_info "lxappearance 安装完成"
 }
 
+install_papirus_icons() {
+    log_step "安装 Papirus 图标主题..."
+
+    if pacman -Q papirus-icon-theme &>/dev/null; then
+        log_warn "Papirus 图标主题已安装, 跳过"
+        return
+    fi
+
+    sudo pacman -S --noconfirm papirus-icon-theme || {
+        log_error "Papirus 图标主题安装失败"
+        return 1
+    }
+    fc-cache -f -v "$HOME/.local/share/icons" 2>/dev/null || true
+    log_info "Papirus 图标主题安装完成"
+}
+
+install_materia_theme() {
+    log_step "安装 Materia GTK 主题..."
+
+    if pacman -Q materia-gtk-theme &>/dev/null; then
+        log_warn "Materia GTK 主题已安装, 跳过"
+        return
+    fi
+
+    sudo pacman -S --noconfirm materia-gtk-theme || {
+        log_error "Materia GTK 主题安装失败"
+        return 1
+    }
+    fc-cache -f -v "$HOME/.local/share/themes" 2>/dev/null || true
+    log_info "Materia GTK 主题安装完成"
+}
+
 # -------------------- GTK 配置相关 --------------------
 scan_local_themes() {
     local themes=()
@@ -503,6 +535,8 @@ interactive_menu() {
     options+=("catppuccin-aur:Catppuccin AUR")
     options+=("mint-y-icons:Mint-Y 图标 (AUR)")
     options+=("mint-theme:Mint 主题 (AUR)")
+    options+=("papirus-icons:Papirus 图标主题")
+    options+=("materia-theme:Materia GTK 主题")
     options+=("lxappearance:lxappearance")
     options+=("gtk-config:GTK 配置")
     options+=("nemo-default:Nemo 默认")
@@ -532,6 +566,8 @@ interactive_menu() {
             catppuccin-aur)   install_catppuccin_aur_packages ;;
             mint-y-icons)    install_mint_icons_from_aur ;;
             mint-theme)    install_mint_theme_from_aur ;;
+            papirus-icons)   install_papirus_icons ;;
+            materia-theme)   install_materia_theme ;;
             lxappearance)  install_lxappearance ;;
             gtk-config)    configure_gtk_manual ;;
             nemo-default) set_nemo_default ;;
