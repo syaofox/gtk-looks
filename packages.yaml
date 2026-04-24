@@ -171,12 +171,12 @@ script:
     desc: Node.js v25 (nvm/开发)
     install: |
       curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-      \. "$HOME/.nvm/nvm.sh"
+      \. "$HOME/.config//nvm.sh"
       nvm install 25
     check: |
-      if [ -s "$HOME/.nvm/nvm.sh" ]; then
-        \. "$HOME/.nvm/nvm.sh"
-        nvm ls 25 &>/dev/null
+
+      if command -v node &>/dev/null && command -v npm &>/dev/null; then
+        node -v | grep -q 'v25'
       else
         false
       fi
