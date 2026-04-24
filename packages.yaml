@@ -174,7 +174,6 @@ script:
       \. "$HOME/.config//nvm.sh"
       nvm install 25
     check: |
-
       if command -v node &>/dev/null && command -v npm &>/dev/null; then
         node -v | grep -q 'v25'
       else
