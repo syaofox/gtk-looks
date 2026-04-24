@@ -116,6 +116,22 @@ install_mint_icons_from_aur() {
 	log_info "Mint-Y 图标安装完成"
 }
 
+install_mint_theme_from_aur() {
+	log_step "安装 Mint 主题 (从 AUR)..."
+
+	if ! command -v paru &>/dev/null; then
+		log_error "未找到 paru，请先安装 AUR helper"
+		return 1
+	fi
+
+	paru -S --noconfirm mint-themes || {
+		log_error "Mint 主题安装失败"
+		return 1
+	}
+	fc-cache -f -v "$HOME/.local/share/icons" 2>/dev/null || true
+	log_info "Mint 主题安装完成"
+}
+
 install_catppuccin_aur_packages() {
 	log_step "安装 Catppuccin AUR 包..."
 
@@ -486,6 +502,7 @@ interactive_menu() {
 
     options+=("catppuccin-aur:Catppuccin AUR")
     options+=("mint-y-icons:Mint-Y 图标 (AUR)")
+    options+=("mint-theme:Mint 主题 (AUR)")
     options+=("lxappearance:lxappearance")
     options+=("gtk-config:GTK 配置")
     options+=("nemo-default:Nemo 默认")
@@ -514,6 +531,7 @@ interactive_menu() {
             icon:*)       install_theme_tarball "${key#icon:}" ;;
             catppuccin-aur)   install_catppuccin_aur_packages ;;
             mint-y-icons)    install_mint_icons_from_aur ;;
+            mint-theme)    install_mint_theme_from_aur ;;
             lxappearance)  install_lxappearance ;;
             gtk-config)    configure_gtk_manual ;;
             nemo-default) set_nemo_default ;;
@@ -558,6 +576,7 @@ main() {
         
         install_catppuccin_aur_packages
         install_mint_icons_from_aur
+        install_mint_theme_from_aur
         configure_gtk_manual
     else
         interactive_menu
