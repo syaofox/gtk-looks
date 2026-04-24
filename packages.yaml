@@ -171,7 +171,8 @@ script:
     desc: Node.js v25 (nvm/开发)
     install: |
       curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-      \. "$HOME/.config//nvm.sh"
+      \. "$HOME/.config/nvm.sh"
+      source "$HOME/.config/.bashrc"
       nvm install 25
     check: |
       if command -v node &>/dev/null && command -v npm &>/dev/null; then
