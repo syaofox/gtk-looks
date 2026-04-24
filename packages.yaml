@@ -168,12 +168,15 @@ script:
 
   - name: nodejs
     command: nvm
-    desc: Node.js v24 (nvm/开发)
+    desc: Node.js v25 (nvm/开发)
     install: |
-      export NVM_DIR="$HOME/.config/nvm"
-      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-      nvm install 24 && nvm alias default 24
+      curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+      \. "$HOME/.nvm/nvm.sh"
+      nvm install 25
     check: |
-      [ -d "$HOME/.config/nvm" ] && export NVM_DIR="$HOME/.config/nvm" &&
-      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" &&
-      nvm list 2>/dev/null | grep -q v24
+      if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        \. "$HOME/.nvm/nvm.sh"
+        nvm ls 25 &>/dev/null
+      else
+        false
+      fi
