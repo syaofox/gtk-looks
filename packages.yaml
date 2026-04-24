@@ -86,11 +86,23 @@ aur:
     install: paru -S --noconfirm shelly-bin
     check: pacman -Q shelly-bin
 
-  - name: krokiet 
+  - name: krokiet
     command: krokiet-bin
     desc: Krokiet - 重复文件清理 (系统)
     install: paru -S --noconfirm krokiet-bin
     check: pacman -Q krokiet-bin
+
+  - name: fcitx5-pinyin-moegirl
+    command: fcitx5
+    desc: Fcitx5 萌娘百科拼音词典
+    install: paru -S --noconfirm fcitx5-pinyin-moegirl
+    check: pacman -Q fcitx5-pinyin-moegirl
+
+  - name: fcitx5-pinyin-sougou-dict
+    command: fcitx5
+    desc: Fcitx5 搜狗拼音词典
+    install: paru -S --noconfirm fcitx5-pinyin-sougou-dict
+    check: pacman -Q fcitx5-pinyin-sougou-dict
 
 flatpak:
   - name: localsend
