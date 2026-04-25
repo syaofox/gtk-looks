@@ -159,7 +159,7 @@ script:
     command: opencode
     desc: OpenCode - AI 代码助手
     install: |
-      if curl -fsSL https://opencode.ai/install 2>/dev/null; then
+      if curl -fsSL https://opencode.ai/install | bash 2>/dev/null; then
         exit 0
       fi
       if command -v npm >/dev/null; then
